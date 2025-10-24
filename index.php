@@ -3,31 +3,32 @@ $subreddit = $_GET['subreddit'] ?? 'czskkurvy';
 $sort = $_GET['sort'] ?? 'new';
 $votesFile = __DIR__.'/votes.json';
 
-// === HLASY ===
+// === Funkce pro načtení hlasů ===
 function loadVotes(){
     global $votesFile;
     if(!file_exists($votesFile)) return [];
-    $j = file_get_contents($votesFile);
-    return json_decode($j,true) ?? [];
+    $json = file_get_contents($votesFile);
+    return json_decode($json,true) ?? [];
 }
-function toggleVote($p){
+function toggleVote($post){
     global $votesFile;
-    $v = loadVotes();
-    $v[$p] = isset($v[$p]) && $v[$p]==1 ? 0 : 1;
-    file_put_contents($votesFile,json_encode($v));
-    return $v[$p];
+    $votes = loadVotes();
+    $votes[$post] = isset($votes[$post]) && $votes[$post]==1 ? 0 : 1;
+    file_put_contents($votesFile,json_encode($votes));
+    return $votes[$post];
 }
 if(isset($_GET['like'])){
-    header('Content-Type:application/json');
+    header('Content-Type: application/json');
     echo json_encode(['state'=>toggleVote($_GET['like'])]);
     exit;
 }
 
-// === Načtení Redditu přímo (Render má čistou IP) ===
+// === Funkce pro načtení Reddit příspěvků ===
 function getRedditPosts($subreddit,$sort,$after=null,$limit=10){
-    $url="https://www.reddit.com/r/$subreddit/$sort.json?limit=$limit";
-    if($after)$url.="&after=$after";
-    $ch=curl_init($url);
+    $url = "https://www.reddit.com/r/$subreddit/$sort.json?limit=$limit";
+    if($after) $url .= "&after=$after";
+
+    $ch = curl_init($url);
     curl_setopt_array($ch,[
         CURLOPT_RETURNTRANSFER=>true,
         CURLOPT_FOLLOWLOCATION=>true,
@@ -35,47 +36,48 @@ function getRedditPosts($subreddit,$sort,$after=null,$limit=10){
         CURLOPT_SSL_VERIFYPEER=>false,
         CURLOPT_TIMEOUT=>10
     ]);
-    $r=curl_exec($ch);
-    $code=curl_getinfo($ch,CURLINFO_HTTP_CODE);
-    $err=curl_error($ch);
+    $response = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    if($code!==200||!$r){
-        file_put_contents(__DIR__.'/debug_log.txt',"URL:$url\nHTTP:$code\nERR:$err\nLEN:".strlen($r)."\n\n",FILE_APPEND);
+    if($code!==200 || !$response){
+        file_put_contents(__DIR__.'/debug_log.txt',"HTTP:$code URL:$url\n",FILE_APPEND);
         return null;
     }
-    $j=json_decode($r,true);
-    return isset($j['data']['children'])?$j:null;
+    $json = json_decode($response,true);
+    return isset($json['data']['children']) ? $json : null;
 }
 
-// === Vytažení médií ===
-function extractMedia($p){
-    $m=[]; $d=$p['data'];
-    if(isset($d['is_gallery'])&&isset($d['media_metadata'])){
+// === Zpracování médií ===
+function extractMedia($post){
+    $media=[]; $d=$post['data'];
+    if(isset($d['is_gallery']) && isset($d['media_metadata'])){
         foreach($d['media_metadata'] as $x){
             $u=$x['s']['u']??null;
-            if($u)$m[]=['type'=>'img','src'=>str_replace('&amp;','&',$u)];
+            if($u)$media[]=['type'=>'img','src'=>str_replace('&amp;','&',$u)];
         }
     }elseif(isset($d['secure_media']['reddit_video'])){
         $v=$d['secure_media']['reddit_video']['fallback_url']??null;
-        if($v)$m[]=['type'=>'video','src'=>$v];
+        if($v)$media[]=['type'=>'video','src'=>$v];
     }elseif(isset($d['url'])){
         $u=$d['url'];
         $ext=strtolower(pathinfo(parse_url($u,PHP_URL_PATH),PATHINFO_EXTENSION));
-        if(in_array($ext,['jpg','jpeg','png','gif','webp']))$m[]=['type'=>'img','src'=>$u];
-        if(in_array($ext,['mp4','webm','mov','m4v']))$m[]=['type'=>'video','src'=>$u];
+        if(in_array($ext,['jpg','jpeg','png','gif','webp']))$media[]=['type'=>'img','src'=>$u];
+        if(in_array($ext,['mp4','webm','mov','m4v']))$media[]=['type'=>'video','src'=>$u];
     }
-    return $m;
+    return $media;
 }
 
-// === Načti data ===
-$data=getRedditPosts($subreddit,$sort);
-$votes=loadVotes(); $posts=[];
+// === Načtení příspěvků ===
+$data = getRedditPosts($subreddit,$sort);
+$votes = loadVotes();
+$posts = [];
+
 if($data){
     foreach($data['data']['children'] as $ch){
-        $media=extractMedia($ch);
+        $media = extractMedia($ch);
         if($media){
-            $link='https://reddit.com'.$ch['data']['permalink'];
-            $posts[]=[
+            $link = 'https://reddit.com'.$ch['data']['permalink'];
+            $posts[] = [
                 'title'=>$ch['data']['title'],
                 'author'=>$ch['data']['author'],
                 'link'=>$link,
@@ -84,7 +86,9 @@ if($data){
             ];
         }
     }
-}else{$error="❌ Nelze načíst příspěvky – Reddit odmítl spojení (zkontroluj subreddit).";}
+}else{
+    $error = "❌ Nelze načíst příspěvky – Reddit odmítl spojení nebo chybí data.";
+}
 ?>
 <!DOCTYPE html>
 <html lang="cs">
