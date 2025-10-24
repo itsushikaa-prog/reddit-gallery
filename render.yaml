@@ -1,8 +1,7 @@
 services:
   - type: web
-    name: reddit-gallery
+    name: reddit-gallery-php
     env: php
     plan: free
-    autoDeploy: true
     buildCommand: ""
     startCommand: ""
